@@ -1,9 +1,8 @@
+// Generic GET hook — wraps useQuery with abort-signal support and a manual invalidate helper
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
-import { resolveError } from "@/lib/resolve-error";
 import type { AxiosRequestConfig } from "axios";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
+import { api } from "@/lib/api";
+import { resolveError } from "@/utils/resolve-error";
 
 interface UseFetchOptions<T> {
   enabled?:         boolean;
@@ -14,8 +13,6 @@ interface UseFetchOptions<T> {
   params?:          Record<string, string | number | boolean>;
   config?:          AxiosRequestConfig;
 }
-
-// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useFetch<T = unknown>(
   url:      string | null,

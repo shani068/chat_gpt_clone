@@ -1,7 +1,8 @@
+// Mutation hooks for POST / PUT / PATCH / DELETE / file-upload operations
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
-import { resolveError } from "@/lib/resolve-error";
 import type { AxiosProgressEvent } from "axios";
+import { api } from "@/lib/api";
+import { resolveError } from "@/utils/resolve-error";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
