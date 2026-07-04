@@ -1,4 +1,4 @@
-// Auth API calls — login, register, logout, and current-user fetch
+// Auth API calls — login, register, logout, and current-user fetch.
 import { api } from "@/lib/api";
 import type { ApiResponse } from "@/types/api";
 import type {
