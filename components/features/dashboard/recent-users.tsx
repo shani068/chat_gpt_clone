@@ -1,6 +1,6 @@
 // Table of recently joined users — in a real app this would call useFetch
-import { formatDate } from "@/utils/format-date";
 import type { User } from "@/types/auth";
+import { formatDate } from "@/utils/format-date";
 
 const DUMMY_USERS: User[] = [
   { id: "1", name: "Alice Martin",  email: "alice@example.com",  role: "admin", createdAt: "2026-06-20T10:00:00Z" },

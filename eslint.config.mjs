@@ -26,6 +26,19 @@ import prettier from "eslint-config-prettier";
 import nextPlugin from "@next/eslint-plugin-next";
 
 export default [
+  // ── Global ignores ───────────────────────────────────────────────────────
+  // Must be its own config object with no `files` key: ignores declared inside
+  // a targeted block only apply to that block, which let build output through.
+  {
+    ignores: [
+      "node_modules/**",
+      ".next/**",
+      "out/**",
+      "dist/**",
+      "next-env.d.ts",
+    ],
+  },
+
   // ── Next.js core web vitals — must be first ──────────────────────────────
   {
     plugins: {
@@ -39,14 +52,17 @@ export default [
 
   // ── Main config ──────────────────────────────────────────────────────────
   {
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: [
-      "node_modules/**",
-      ".next/**",
-      "out/**",
-      "dist/**",
-      "*.config.{js,mjs,ts}",
-      "next-env.d.ts",
+    // This project keeps its source at the repository root, not under src/.
+    files: [
+      "app/**/*.{ts,tsx}",
+      "components/**/*.{ts,tsx}",
+      "constants/**/*.{ts,tsx}",
+      "hooks/**/*.{ts,tsx}",
+      "lib/**/*.{ts,tsx}",
+      "providers/**/*.{ts,tsx}",
+      "services/**/*.{ts,tsx}",
+      "types/**/*.{ts,tsx}",
+      "utils/**/*.{ts,tsx}",
     ],
 
     languageOptions: {
@@ -184,12 +200,28 @@ export default [
           leadingUnderscore: "allow",
         },
 
-        // Boolean variables — is/has/should prefix
+        // Boolean variables — is/has/should prefix.
+        // The format must allow PascalCase: the prefix is stripped before the
+        // format check, so `isStreaming` is validated as `Streaming`.
         {
           selector: "variable",
           types: ["boolean"],
-          format: ["camelCase"],
+          format: ["camelCase", "PascalCase"],
           prefix: ["is", "has", "should", "can", "did", "will", "are", "show"],
+        },
+
+        // Names that come from a destructure are dictated by their source
+        // (Radix, React Hook Form, useState tuples) — not ours to rename.
+        {
+          selector: "variable",
+          modifiers: ["destructured"],
+          format: null,
+        },
+
+        // Imports — React components arrive as PascalCase, namespaces too.
+        {
+          selector: "import",
+          format: ["camelCase", "PascalCase"],
         },
 
         // Functions — camelCase or PascalCase (React components)
@@ -198,10 +230,10 @@ export default [
           format: ["camelCase", "PascalCase"],
         },
 
-        // Parameters — camelCase
+        // Parameters — camelCase, or PascalCase when the value is a component
         {
           selector: "parameter",
-          format: ["camelCase"],
+          format: ["camelCase", "PascalCase"],
           leadingUnderscore: "allow",
         },
 
@@ -235,6 +267,13 @@ export default [
         {
           selector: "enumMember",
           format: ["UPPER_CASE"],
+        },
+
+        // Quoted keys are external contracts — headers, CSS properties.
+        {
+          selector: "objectLiteralProperty",
+          modifiers: ["requiresQuotes"],
+          format: null,
         },
 
         // Object properties — camelCase (snake_case for API responses)
@@ -394,7 +433,7 @@ export default [
         "error",
         { allowShortCircuit: true, allowTernary: true },
       ],
-      "@typescript-eslint/no-throw-literal": "error",
+      "@typescript-eslint/only-throw-error": "error",
     },
   },
 

@@ -1,8 +1,9 @@
 // TanStack Query v5 provider — creates a stable QueryClient per session
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 export function QueryProvider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(

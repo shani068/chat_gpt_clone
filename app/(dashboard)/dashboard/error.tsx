@@ -19,7 +19,7 @@ export default function DashboardError({ error, reset }: ErrorProps) {
       <p className="text-sm text-zinc-500">{error.message}</p>
       <button
         onClick={reset}
-        className="rounded-full bg-black px-5 py-2 text-sm font-medium text-white hover:bg-zinc-800 transition-colors"
+        className="rounded-full bg-black px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
       >
         Try again
       </button>
