@@ -2,6 +2,7 @@
 "use client";
 
 import { useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { usePatch } from "@/hooks/useApi";
@@ -13,12 +14,12 @@ interface SettingsPayload {
 
 export function SettingsForm() {
   const [form, setForm] = useState<SettingsPayload>({ name: "Jane Doe", email: "jane@example.com" });
-  const [saved, setSaved] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
 
   const { mutate, isPending } = usePatch<SettingsPayload, SettingsPayload>("/users/me", {
     onSuccess: () => {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 3000);
     },
   });
 
@@ -48,7 +49,7 @@ export function SettingsForm() {
         <Button type="submit" loading={isPending}>
           Save changes
         </Button>
-        {saved && <p className="text-sm text-green-600">Saved!</p>}
+        {isSaved && <p className="text-sm text-green-600">Saved!</p>}
       </div>
     </form>
   );

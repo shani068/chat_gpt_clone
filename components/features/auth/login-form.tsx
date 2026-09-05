@@ -1,66 +1,77 @@
-// Login form — calls the login endpoint and redirects to dashboard on success
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+
+import { useState } from "react";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { ArrowRight } from "lucide-react";
+import { useForm } from "react-hook-form";
+
+import { useToast } from "@/components/shared/toast-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { usePost } from "@/hooks/useApi";
-import { setSession } from "@/lib/auth";
 import { ROUTES } from "@/constants/routes";
-import type { AuthSession } from "@/types/auth";
-import type { LoginCredentials } from "@/types/auth";
+import { loginSchema, type LoginValues } from "@/lib/validations/auth.schema";
+import { useSession } from "@/providers/session-provider";
 
 export function LoginForm() {
   const router = useRouter();
-  const [form, setForm] = useState<LoginCredentials>({ email: "", password: "" });
-  const [apiError, setApiError] = useState<string | null>(null);
+  const { signIn } = useSession();
+  const { toast } = useToast();
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const { mutate, isPending } = usePost<AuthSession, LoginCredentials>("/auth/login", {
-    onSuccess: (session) => {
-      setSession(session);
-      router.push(ROUTES.DASHBOARD);
-    },
-    onError: (msg) => setApiError(msg),
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "alex@example.com", password: "" },
   });
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setApiError(null);
-    mutate(form);
-  }
+  const onSubmit = handleSubmit(async (values) => {
+    setSubmitError(null);
+    try {
+      const user = await signIn({ email: values.email });
+      toast({ title: `Welcome back, ${user.name.split(" ")[0]}`, variant: "success" });
+      router.push(ROUTES.CHAT);
+    } catch {
+      setSubmitError("We could not sign you in. Please try again.");
+    }
+  });
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <form onSubmit={onSubmit} noValidate className="space-y-4">
       <Input
-        id="email"
-        type="email"
         label="Email"
-        placeholder="you@example.com"
-        value={form.email}
-        onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-        required
+        type="email"
+        autoComplete="email"
+        placeholder="you@company.com"
+        error={errors.email?.message}
+        {...register("email")}
       />
+
       <Input
-        id="password"
-        type="password"
         label="Password"
-        placeholder="••••••••"
-        value={form.password}
-        onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-        required
+        type="password"
+        autoComplete="current-password"
+        placeholder="At least 8 characters"
+        error={errors.password?.message}
+        hint="This demo does not check the password — any 8 characters work."
+        {...register("password")}
       />
-      {apiError && <p className="text-sm text-red-500">{apiError}</p>}
-      <Button type="submit" loading={isPending} className="w-full mt-2">
-        Sign in
+
+      {submitError ? (
+        <p role="alert" className="text-caption text-destructive">
+          {submitError}
+        </p>
+      ) : null}
+
+      <Button type="submit" variant="primary" size="lg" block loading={isSubmitting}>
+        {isSubmitting ? "Signing in…" : "Sign in"}
+        {isSubmitting ? null : <ArrowRight size={15} strokeWidth={2} aria-hidden />}
       </Button>
-      <p className="text-center text-sm text-zinc-500">
-        No account?{" "}
-        <Link href={ROUTES.REGISTER} className="font-medium text-zinc-900 underline">
-          Create one
-        </Link>
-      </p>
     </form>
   );
 }

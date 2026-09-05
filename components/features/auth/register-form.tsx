@@ -1,58 +1,84 @@
-// Register form — creates a new account and redirects to login on success
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+
+import { useState } from "react";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { ArrowRight } from "lucide-react";
+import { useForm } from "react-hook-form";
+
+import { useToast } from "@/components/shared/toast-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { usePost } from "@/hooks/useApi";
 import { ROUTES } from "@/constants/routes";
-import type { RegisterCredentials, User } from "@/types/auth";
+import { registerSchema, type RegisterValues } from "@/lib/validations/auth.schema";
+import { useSession } from "@/providers/session-provider";
 
 export function RegisterForm() {
   const router = useRouter();
-  const [form, setForm] = useState<RegisterCredentials>({
-    name: "", email: "", password: "", confirmPassword: "",
+  const { signIn } = useSession();
+  const { toast } = useToast();
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterValues>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { name: "", email: "", password: "" },
   });
-  const [apiError, setApiError] = useState<string | null>(null);
 
-  const { mutate, isPending } = usePost<User, RegisterCredentials>("/auth/register", {
-    onSuccess: () => router.push(ROUTES.LOGIN),
-    onError:   (msg) => setApiError(msg),
-  });
-
-  function set(field: keyof RegisterCredentials) {
-    return (e: React.ChangeEvent<HTMLInputElement>) =>
-      setForm((f) => ({ ...f, [field]: e.target.value }));
-  }
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setApiError(null);
-    if (form.password !== form.confirmPassword) {
-      setApiError("Passwords do not match");
-      return;
+  const onSubmit = handleSubmit(async (values) => {
+    setSubmitError(null);
+    try {
+      await signIn({ email: values.email, name: values.name });
+      toast({ title: "Account created", variant: "success" });
+      router.push(ROUTES.CHAT);
+    } catch {
+      setSubmitError("We could not create your account. Please try again.");
     }
-    mutate(form);
-  }
+  });
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <Input id="name"            type="text"     label="Name"             placeholder="Jane Doe"         value={form.name}            onChange={set("name")}            required />
-      <Input id="email"           type="email"    label="Email"            placeholder="you@example.com"  value={form.email}           onChange={set("email")}           required />
-      <Input id="password"        type="password" label="Password"         placeholder="••••••••"         value={form.password}        onChange={set("password")}        required />
-      <Input id="confirmPassword" type="password" label="Confirm password" placeholder="••••••••"         value={form.confirmPassword} onChange={set("confirmPassword")} required />
-      {apiError && <p className="text-sm text-red-500">{apiError}</p>}
-      <Button type="submit" loading={isPending} className="w-full mt-2">
-        Create account
+    <form onSubmit={onSubmit} noValidate className="space-y-4">
+      <Input
+        label="Name"
+        autoComplete="name"
+        placeholder="Alex Rivera"
+        error={errors.name?.message}
+        {...register("name")}
+      />
+
+      <Input
+        label="Email"
+        type="email"
+        autoComplete="email"
+        placeholder="you@company.com"
+        error={errors.email?.message}
+        {...register("email")}
+      />
+
+      <Input
+        label="Password"
+        type="password"
+        autoComplete="new-password"
+        placeholder="At least 8 characters"
+        error={errors.password?.message}
+        {...register("password")}
+      />
+
+      {submitError ? (
+        <p role="alert" className="text-caption text-destructive">
+          {submitError}
+        </p>
+      ) : null}
+
+      <Button type="submit" variant="primary" size="lg" block loading={isSubmitting}>
+        {isSubmitting ? "Creating account…" : "Create account"}
+        {isSubmitting ? null : <ArrowRight size={15} strokeWidth={2} aria-hidden />}
       </Button>
-      <p className="text-center text-sm text-zinc-500">
-        Already have an account?{" "}
-        <Link href={ROUTES.LOGIN} className="font-medium text-zinc-900 underline">
-          Sign in
-        </Link>
-      </p>
     </form>
   );
 }
