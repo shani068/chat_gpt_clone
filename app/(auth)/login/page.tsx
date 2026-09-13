@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import Link from "next/link";
 
+import { AuthDivider, GoogleSignInButton } from "@/components/features/auth/google-sign-in-button";
 import { LoginForm } from "@/components/features/auth/login-form";
 import { ROUTES } from "@/constants/routes";
 
@@ -9,7 +10,15 @@ export const metadata: Metadata = {
   title: "Sign in",
 };
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string | string[] }>;
+}) {
+  // Better Auth redirects failed OAuth callbacks here with ?error=<code>.
+  const { error } = await searchParams;
+  const oauthError = Array.isArray(error) ? error[0] : error;
+
   return (
     <>
       <header className="mb-6">
@@ -19,6 +28,8 @@ export default function LoginPage() {
         </p>
       </header>
 
+      <GoogleSignInButton initialError={oauthError} />
+      <AuthDivider />
       <LoginForm />
 
       <p className="text-small text-muted-foreground mt-6 text-center">

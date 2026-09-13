@@ -12,12 +12,13 @@ import { useToast } from "@/components/shared/toast-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ROUTES } from "@/constants/routes";
+import { authErrorMessage } from "@/lib/auth-client";
 import { registerSchema, type RegisterValues } from "@/lib/validations/auth.schema";
-import { useSession } from "@/providers/session-provider";
+import { AuthError, useSession } from "@/providers/session-provider";
 
 export function RegisterForm() {
   const router = useRouter();
-  const { signIn } = useSession();
+  const { signUp } = useSession();
   const { toast } = useToast();
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -33,11 +34,16 @@ export function RegisterForm() {
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(null);
     try {
-      await signIn({ email: values.email, name: values.name });
+      await signUp({ email: values.email, password: values.password, name: values.name });
       toast({ title: "Account created", variant: "success" });
       router.push(ROUTES.CHAT);
-    } catch {
-      setSubmitError("We could not create your account. Please try again.");
+      router.refresh();
+    } catch (error) {
+      setSubmitError(
+        error instanceof AuthError
+          ? authErrorMessage(error.code ?? "unknown")
+          : "We could not create your account. Please try again.",
+      );
     }
   });
 
