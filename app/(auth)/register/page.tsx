@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import Link from "next/link";
 
+import { AuthDivider, GoogleSignInButton } from "@/components/features/auth/google-sign-in-button";
 import { RegisterForm } from "@/components/features/auth/register-form";
 import { ROUTES } from "@/constants/routes";
 
@@ -19,6 +20,8 @@ export default function RegisterPage() {
         </p>
       </header>
 
+      <GoogleSignInButton label="Sign up with Google" />
+      <AuthDivider />
       <RegisterForm />
 
       <p className="text-small text-muted-foreground mt-6 text-center">

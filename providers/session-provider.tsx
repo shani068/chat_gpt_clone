@@ -2,104 +2,96 @@
 
 import { useRouter } from "next/navigation";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
 
-import { USER_KEY } from "@/lib/chat/mock-chat-service";
+import { authClient } from "@/lib/auth-client";
 import type { User } from "@/types/user";
 
 /**
- * Mock session. There is no auth server, so the "session" is a stored user
- * record — but the surface (user, status, signIn, signOut) is the one a real
- * provider would expose, so swapping it out touches no component.
+ * Session backed by Better Auth. The session lives in an httpOnly cookie set by
+ * the auth server; this provider only mirrors it for the UI. Route access is
+ * enforced server-side in proxy.ts, not here.
  */
-const DEMO_USER: User = {
-  id: "user_demo",
-  name: "Alex Rivera",
-  email: "alex@example.com",
-  plan: "Pro",
-};
-
 interface SessionContextValue {
   user: User | null;
   status: "loading" | "authenticated" | "unauthenticated";
-  signIn: (input: { email: string; name?: string }) => Promise<User>;
-  signOut: () => void;
+  error: Error | null;
+  signIn: (input: { email: string; password: string }) => Promise<User>;
+  signUp: (input: { email: string; password: string; name: string }) => Promise<User>;
+  signOut: () => Promise<void>;
+  refetch: () => void;
+}
+
+/** Thrown with Better Auth's error code so forms can pick their own copy. */
+export class AuthError extends Error {
+  constructor(public code: string | undefined, message?: string) {
+    super(message ?? code ?? "Authentication failed");
+  }
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [status, setStatus] = useState<SessionContextValue["status"]>("loading");
+  const { data, isPending, error, refetch } = authClient.useSession();
 
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(USER_KEY);
-      const stored = raw ? (JSON.parse(raw) as User) : null;
-      setUser(stored);
-      setStatus(stored ? "authenticated" : "unauthenticated");
-    } catch {
-      setStatus("unauthenticated");
-    }
-  }, []);
+  const user = useMemo(() => (data?.user ? toAppUser(data.user) : null), [data?.user]);
 
-  const signIn = useCallback(async ({ email, name }: { email: string; name?: string }) => {
-    // Stand-in for a token exchange.
-    await new Promise((resolve) => setTimeout(resolve, 600));
+  const status: SessionContextValue["status"] = isPending
+    ? "loading"
+    : user
+      ? "authenticated"
+      : "unauthenticated";
 
-    const nextUser: User = {
-      ...DEMO_USER,
-      id: `user_${email.split("@")[0]}`,
+  const signIn = useCallback(async ({ email, password }: { email: string; password: string }) => {
+    const { data: result, error: signInError } = await authClient.signIn.email({
       email,
-      // A blank name must fall back to the handle, so `??` would not do.
-      name: name?.trim() ? name.trim() : nameFromEmail(email),
-    };
-
-    try {
-      window.localStorage.setItem(USER_KEY, JSON.stringify(nextUser));
-    } catch {
-      /* Session still works for this tab without persistence. */
+      password,
+    });
+    if (signInError || !result) {
+      throw new AuthError(signInError?.code, signInError?.message);
     }
-
-    setUser(nextUser);
-    setStatus("authenticated");
-    return nextUser;
+    return toAppUser(result.user);
   }, []);
 
-  const signOut = useCallback(() => {
-    try {
-      window.localStorage.removeItem(USER_KEY);
-    } catch {
-      /* nothing to clean up */
-    }
-    setUser(null);
-    setStatus("unauthenticated");
+  const signUp = useCallback(
+    async ({ email, password, name }: { email: string; password: string; name: string }) => {
+      const { data: result, error: signUpError } = await authClient.signUp.email({
+        email,
+        password,
+        name,
+      });
+      if (signUpError || !result) {
+        throw new AuthError(signUpError?.code, signUpError?.message);
+      }
+      return toAppUser(result.user);
+    },
+    [],
+  );
+
+  const signOut = useCallback(async () => {
+    await authClient.signOut();
     router.push("/");
+    // Drop any server-rendered output cached for the signed-in user.
+    router.refresh();
   }, [router]);
 
   const value = useMemo(
-    () => ({ user, status, signIn, signOut }),
-    [user, status, signIn, signOut],
+    () => ({ user, status, error: error ?? null, signIn, signUp, signOut, refetch }),
+    [user, status, error, signIn, signUp, signOut, refetch],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
-function nameFromEmail(email: string): string {
-  const handle = email.split("@")[0] ?? "there";
-  return handle
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join(" ");
+function toAppUser(user: { id: string; name: string; email: string; image?: string | null }): User {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatarUrl: user.image ?? undefined,
+    plan: "Free",
+  };
 }
 
 export function useSession(): SessionContextValue {
@@ -109,5 +101,3 @@ export function useSession(): SessionContextValue {
   }
   return context;
 }
-
-export { DEMO_USER };

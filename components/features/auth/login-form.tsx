@@ -12,8 +12,9 @@ import { useToast } from "@/components/shared/toast-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ROUTES } from "@/constants/routes";
+import { authErrorMessage } from "@/lib/auth-client";
 import { loginSchema, type LoginValues } from "@/lib/validations/auth.schema";
-import { useSession } from "@/providers/session-provider";
+import { AuthError, useSession } from "@/providers/session-provider";
 
 export function LoginForm() {
   const router = useRouter();
@@ -27,17 +28,22 @@ export function LoginForm() {
     formState: { errors, isSubmitting },
   } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: "alex@example.com", password: "" },
+    defaultValues: { email: "", password: "" },
   });
 
   const onSubmit = handleSubmit(async (values) => {
     setSubmitError(null);
     try {
-      const user = await signIn({ email: values.email });
+      const user = await signIn({ email: values.email, password: values.password });
       toast({ title: `Welcome back, ${user.name.split(" ")[0]}`, variant: "success" });
       router.push(ROUTES.CHAT);
-    } catch {
-      setSubmitError("We could not sign you in. Please try again.");
+      router.refresh();
+    } catch (error) {
+      setSubmitError(
+        error instanceof AuthError
+          ? authErrorMessage(error.code ?? "unknown")
+          : "We could not sign you in. Please try again.",
+      );
     }
   });
 
@@ -58,7 +64,6 @@ export function LoginForm() {
         autoComplete="current-password"
         placeholder="At least 8 characters"
         error={errors.password?.message}
-        hint="This demo does not check the password — any 8 characters work."
         {...register("password")}
       />
 
