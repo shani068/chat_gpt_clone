@@ -85,7 +85,7 @@ export function Navbar() {
           </Button>
 
           <Button variant="primary" size="sm" asChild>
-            <Link href={ROUTES.CHAT}>Start chatting</Link>
+            <Link href={ROUTES.CHAT_ENTRY}>Start chatting</Link>
           </Button>
 
           <IconButton

@@ -61,7 +61,7 @@ export function Hero() {
             className="mt-8 flex flex-col items-center justify-center gap-2.5 sm:flex-row"
           >
             <Button variant="primary" size="lg" asChild className="w-full sm:w-auto">
-              <Link href={ROUTES.CHAT}>
+              <Link href={ROUTES.CHAT_ENTRY}>
                 Start chatting
                 <ArrowRight size={16} strokeWidth={2} aria-hidden />
               </Link>

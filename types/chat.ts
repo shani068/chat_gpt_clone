@@ -42,6 +42,8 @@ export interface ConversationSummary {
   messageCount: number;
   /** First ~90 chars of the last message, for search result context. */
   preview: string;
+  isPinned?: boolean;
+  isArchived?: boolean;
 }
 
 export type ConversationBucket =

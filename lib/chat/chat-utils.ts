@@ -1,3 +1,4 @@
+import type { ApiConversation, ApiMessage } from "@/types/api";
 import type {
   Conversation,
   ConversationBucket,
@@ -91,6 +92,49 @@ export function toSummary(conversation: Conversation): ConversationSummary {
     updatedAt: conversation.updatedAt,
     messageCount: conversation.messages.length,
     preview: last ? previewOf(last) : "",
+  };
+}
+
+/** Maps a backend conversation row into the sidebar summary shape. */
+export function apiConversationToSummary(
+  conversation: ApiConversation,
+): ConversationSummary {
+  const updatedAt = new Date(
+    conversation.lastMessageAt || conversation.updatedAt,
+  ).getTime();
+
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    createdAt: new Date(conversation.createdAt).getTime(),
+    updatedAt,
+    messageCount: 0,
+    preview: "",
+    isPinned: conversation.isPinned,
+    isArchived: conversation.isArchived,
+  };
+}
+
+/** Maps a backend message into the chat UI message shape. */
+export function apiMessageToMessage(message: ApiMessage): Message {
+  const role =
+    message.role === "USER"
+      ? ("user" as const)
+      : ("assistant" as const);
+
+  const status =
+    message.status === "ERROR"
+      ? ("error" as const)
+      : message.status === "PENDING"
+        ? ("streaming" as const)
+        : ("idle" as const);
+
+  return {
+    id: message.id,
+    role,
+    content: message.content,
+    createdAt: new Date(message.createdAt).getTime(),
+    status: status === "streaming" ? "idle" : status,
   };
 }
 

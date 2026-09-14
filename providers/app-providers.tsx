@@ -7,13 +7,14 @@ import { ToastProvider } from "@/components/shared/toast-provider";
 
 import { ChatProvider } from "./chat-provider";
 import { PreferencesProvider } from "./preferences-provider";
+import { QueryProvider } from "./query-provider";
 import { SessionProvider } from "./session-provider";
 
 /**
  * Provider tree, outermost first.
  *
- * Order is load-bearing: ChatProvider raises toasts and reads preferences, so
- * it must sit inside both of those.
+ * Order is load-bearing: ChatProvider raises toasts, reads preferences, and
+ * uses React Query, so it must sit inside those providers.
  */
 export function AppProviders({ children }: { children: React.ReactNode }) {
   return (
@@ -25,11 +26,13 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     >
       <TooltipProvider delayDuration={320} skipDelayDuration={200}>
         <ToastProvider>
-          <SessionProvider>
-            <PreferencesProvider>
-              <ChatProvider>{children}</ChatProvider>
-            </PreferencesProvider>
-          </SessionProvider>
+          <QueryProvider>
+            <SessionProvider>
+              <PreferencesProvider>
+                <ChatProvider>{children}</ChatProvider>
+              </PreferencesProvider>
+            </SessionProvider>
+          </QueryProvider>
         </ToastProvider>
       </TooltipProvider>
     </ThemeProvider>

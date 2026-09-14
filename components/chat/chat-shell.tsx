@@ -9,6 +9,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import type { SettingsSectionId } from "@/components/settings/settings-panel";
 import { ConversationSearch } from "@/components/sidebar/conversation-search";
+import { conversationRoute } from "@/constants/routes";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { useIsMobile } from "@/hooks/use-media-query";
 import { useChatContext } from "@/providers/chat-provider";
@@ -167,7 +168,7 @@ export function ChatShell({ chatId }: { chatId?: string }) {
         open={isSearchOpen}
         onOpenChange={setIsSearchOpen}
         conversations={conversations}
-        onSelect={(id) => router.push(`/chat/${id}`)}
+        onSelect={(id) => router.push(conversationRoute(id))}
         onNewChat={handleNewChat}
         onOpenSettings={() => openSettings()}
       />
