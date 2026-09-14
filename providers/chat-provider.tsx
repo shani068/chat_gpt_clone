@@ -13,9 +13,19 @@ import {
 } from "react";
 
 import { useToast } from "@/components/shared/toast-provider";
-import { toSummary } from "@/lib/chat/chat-utils";
+import { CONVERSATIONS_API, MESSAGES_API, ROUTES, conversationRoute } from "@/constants/routes";
+import { useDelete, usePost } from "@/hooks/useApi";
+import { useFetch } from "@/hooks/useFetch";
+import { api } from "@/lib/api";
+import {
+  apiConversationToSummary,
+  apiMessageToMessage,
+  deriveTitle,
+} from "@/lib/chat/chat-utils";
 import * as service from "@/lib/chat/mock-chat-service";
 import { usePreferences } from "@/providers/preferences-provider";
+import { useSession } from "@/providers/session-provider";
+import type { ApiConversation, ApiEnvelope, ApiMessage } from "@/types/api";
 import type {
   Conversation,
   ConversationSummary,
@@ -53,6 +63,8 @@ interface ChatContextValue {
   startNewChat: () => void;
   rename: (id: string, title: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
+  /** Clear the active thread if it was archived/deleted from the sidebar. */
+  leaveIfActive: (id: string) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -61,110 +73,126 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { toast } = useToast();
   const { preferences } = usePreferences();
-
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [historyStatus, setHistoryStatus] = useState<LoadStatus>("loading");
+  const { status: sessionStatus } = useSession();
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [conversationStatus, setConversationStatus] = useState<LoadStatus>("idle");
   const [activeId, setActiveId] = useState<string | null>(null);
-
   const [isStreaming, setIsStreaming] = useState(false);
 
-  // Live handle on the running stream so Stop is instantaneous.
   const streamRef = useRef<StreamHandle | null>(null);
-  // Regeneration counter per assistant message, so repeats differ.
   const variants = useRef(new Map<string, number>());
-  // Mirrors `conversation` for callbacks that must not re-create on every token.
   const conversationRef = useRef<Conversation | null>(null);
   conversationRef.current = conversation;
 
-  /* ── history ─────────────────────────────────────────────────────────── */
+  /* ── history (Conversation API) ──────────────────────────────────────── */
+
+  const {
+    data: listResponse,
+    isLoading: historyLoading,
+    isError: historyError,
+    invalidate: invalidateConversations,
+  } = useFetch<ApiEnvelope<ApiConversation[]>>(
+    sessionStatus === "authenticated" ? CONVERSATIONS_API : null,
+    ["conversations"],
+    { enabled: sessionStatus === "authenticated" },
+  );
+
+  const conversations = useMemo(() => {
+    const rows = listResponse?.data ?? [];
+    return rows
+      .filter((row) => !row.isArchived)
+      .map(apiConversationToSummary)
+      .sort(
+        (a, b) =>
+          Number(Boolean(b.isPinned)) - Number(Boolean(a.isPinned)) ||
+          b.updatedAt - a.updatedAt,
+      );
+  }, [listResponse]);
+
+  const historyStatus: LoadStatus =
+    sessionStatus !== "authenticated"
+      ? "idle"
+      : historyLoading
+        ? "loading"
+        : historyError
+          ? "error"
+          : "ready";
 
   const refreshHistory = useCallback(async () => {
-    setHistoryStatus("loading");
-    try {
-      setConversations(await service.getConversations());
-      setHistoryStatus("ready");
-    } catch {
-      setHistoryStatus("error");
-    }
-  }, []);
+    invalidateConversations();
+  }, [invalidateConversations]);
 
-  useEffect(() => {
-    void refreshHistory();
-  }, [refreshHistory]);
+  const { mutateAsync: createConversationApi } = usePost<
+    ApiEnvelope<ApiConversation>,
+    { title?: string }
+  >(CONVERSATIONS_API, {
+    invalidateKeys: [["conversations"]],
+  });
 
-  /** Keeps the sidebar summary in step without re-reading storage. */
-  const syncSummary = useCallback((next: Conversation) => {
-    setConversations((current) => {
-      const summary = toSummary(next);
-      const without = current.filter((entry) => entry.id !== next.id);
-      return [summary, ...without].sort((a, b) => b.updatedAt - a.updatedAt);
-    });
-  }, []);
+  const { mutateAsync: createMessageApi } = usePost<
+    ApiEnvelope<ApiMessage>,
+    { conversationId: string; role: "USER" | "ASSISTANT"; content: string; status?: "COMPLETE" | "PENDING" | "ERROR" }
+  >(MESSAGES_API);
 
-  /** Single write path: state, storage and sidebar move together. */
-  const commitConversation = useCallback(
-    (next: Conversation, persist = true) => {
-      setConversation(next);
-      syncSummary(next);
-      if (persist) void service.saveConversation(next);
-    },
-    [syncSummary],
+  const { mutateAsync: deleteConversationApi } = useDelete<ApiEnvelope<null>>(
+    CONVERSATIONS_API,
+    { invalidateKeys: [["conversations"]] },
   );
 
   /* ── routing ─────────────────────────────────────────────────────────── */
 
-  const openConversation = useCallback(
-    (id: string | null) => {
-      if (id === null) {
-        setActiveId(null);
-        setConversation(null);
-        setConversationStatus("idle");
-        return;
-      }
+  const openConversation = useCallback((id: string | null) => {
+    if (id === null) {
+      setActiveId(null);
+      setConversation(null);
+      setConversationStatus("idle");
+      return;
+    }
 
-      // Already open (e.g. we just created it) — do not clobber live state.
-      if (conversationRef.current?.id === id) {
-        setActiveId(id);
-        setConversationStatus("ready");
-        return;
-      }
-
+    // Already open (e.g. we just created it) — do not clobber live state.
+    if (conversationRef.current?.id === id) {
       setActiveId(id);
-      setConversationStatus("loading");
+      setConversationStatus("ready");
+      return;
+    }
 
-      void service
-        .getConversation(id)
-        .then((found) => {
-          if (!found) {
-            setConversation(null);
-            setConversationStatus("error");
-            return;
-          }
-          // A stream can only belong to a conversation we are still viewing.
-          setConversation({
-            ...found,
-            messages: found.messages.map((message) =>
-              message.status === "streaming"
-                ? { ...message, status: "idle" as const }
-                : message,
-            ),
-          });
-          setConversationStatus("ready");
-        })
-        .catch(() => setConversationStatus("error"));
-    },
-    [],
-  );
+    setActiveId(id);
+    setConversationStatus("loading");
+
+    void (async () => {
+      try {
+        const [conversationRes, messagesRes] = await Promise.all([
+          api.get<ApiEnvelope<ApiConversation>>(`${CONVERSATIONS_API}/${id}`),
+          api.get<ApiEnvelope<ApiMessage[]>>(MESSAGES_API, {
+            params: { conversationId: id },
+          }),
+        ]);
+
+        const found = conversationRes.data.data;
+        const messages = (messagesRes.data.data ?? []).map(apiMessageToMessage);
+
+        setConversation({
+          id: found.id,
+          title: found.title,
+          createdAt: new Date(found.createdAt).getTime(),
+          updatedAt: new Date(found.updatedAt).getTime(),
+          messages,
+        });
+        setConversationStatus("ready");
+      } catch {
+        setConversation(null);
+        setConversationStatus("error");
+      }
+    })();
+  }, []);
 
   const startNewChat = useCallback(() => {
     streamRef.current?.stop();
     streamRef.current = null;
     setIsStreaming(false);
     openConversation(null);
-    router.push("/chat");
+    router.push(ROUTES.CHAT);
   }, [openConversation, router]);
 
   /* ── generation ──────────────────────────────────────────────────────── */
@@ -206,7 +234,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             setIsStreaming(false);
             setConversation((current) => {
               if (current?.id !== target.id) return current;
-              const next: Conversation = {
+              return {
                 ...current,
                 updatedAt: Date.now(),
                 messages: current.messages.map((message) =>
@@ -215,9 +243,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                     : message,
                 ),
               };
-              syncSummary(next);
-              void service.saveConversation(next);
-              return next;
+            });
+
+            void createMessageApi({
+              conversationId: target.id,
+              role: "ASSISTANT",
+              content: full,
+              status: "COMPLETE",
+            }).catch(() => {
+              /* Sidebar history already exists; assistant persistence is best-effort. */
             });
           },
 
@@ -226,7 +260,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             setIsStreaming(false);
             setConversation((current) => {
               if (current?.id !== target.id) return current;
-              const next: Conversation = {
+              return {
                 ...current,
                 messages: current.messages.map((message) =>
                   message.id === assistantId
@@ -234,14 +268,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                     : message,
                 ),
               };
-              void service.saveConversation(next);
-              return next;
             });
           },
         },
       );
     },
-    [preferences.chat.streamResponses, syncSummary],
+    [createMessageApi, preferences.chat.streamResponses],
   );
 
   const sendMessage = useCallback(
@@ -251,14 +283,32 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       let target = conversationRef.current;
 
-      // First message of a brand-new chat creates the conversation. The URL is
-      // updated through the History API rather than router.push, so the shell
-      // is not torn down and remounted in the middle of a stream.
+      // First message of a brand-new chat creates the conversation via the API.
+      // History API replaceState avoids remounting the shell mid-stream.
       if (!target) {
-        target = await service.createConversation();
-        setActiveId(target.id);
-        setConversationStatus("ready");
-        window.history.replaceState(null, "", `/chat/${target.id}`);
+        try {
+          const created = await createConversationApi({
+            title: deriveTitle(trimmed),
+          });
+          const row = created.data;
+          target = {
+            id: row.id,
+            title: row.title,
+            createdAt: new Date(row.createdAt).getTime(),
+            updatedAt: new Date(row.updatedAt).getTime(),
+            messages: [],
+          };
+          setActiveId(target.id);
+          setConversationStatus("ready");
+          window.history.replaceState(null, "", conversationRoute(target.id));
+        } catch (error) {
+          toast({
+            title: "Could not start conversation",
+            description: error instanceof Error ? error.message : undefined,
+            variant: "error",
+          });
+          return;
+        }
       }
 
       const userMessage = service.buildUserMessage(trimmed, attachments);
@@ -268,17 +318,31 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         ...target,
         title:
           target.messages.length === 0
-            ? service.titleForFirstMessage(trimmed)
+            ? deriveTitle(trimmed)
             : target.title,
         updatedAt: Date.now(),
         messages: [...target.messages, userMessage, assistantMessage],
       };
 
-      commitConversation(next);
+      setConversation(next);
+      conversationRef.current = next;
+
+      void createMessageApi({
+        conversationId: next.id,
+        role: "USER",
+        content: trimmed,
+        status: "COMPLETE",
+      }).catch(() => {
+        toast({
+          title: "Message may not have been saved",
+          variant: "error",
+        });
+      });
+
       variants.current.set(assistantMessage.id, 0);
       runStream(next, assistantMessage.id, trimmed, 0);
     },
-    [commitConversation, isStreaming, runStream],
+    [createConversationApi, createMessageApi, isStreaming, runStream, toast],
   );
 
   const stopGeneration = useCallback(() => {
@@ -288,25 +352,21 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     setConversation((current) => {
       if (!current) return current;
-      const next: Conversation = {
+      return {
         ...current,
         messages: current.messages.map((message) =>
           message.status === "streaming"
             ? {
                 ...message,
                 status: "idle" as const,
-                // A stop with nothing generated should not leave an empty bubble.
                 content: message.content || "_Generation stopped._",
               }
             : message,
         ),
       };
-      void service.saveConversation(next);
-      return next;
     });
   }, []);
 
-  /** Re-runs generation for an assistant message already in the transcript. */
   const regenerateAt = useCallback(
     (assistantId: string) => {
       const current = conversationRef.current;
@@ -340,10 +400,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         ),
       };
 
-      commitConversation(next, false);
+      setConversation(next);
       runStream(next, assistantId, prompt.content, variant);
     },
-    [commitConversation, isStreaming, runStream],
+    [isStreaming, runStream],
   );
 
   const regenerate = useCallback(() => {
@@ -359,10 +419,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [regenerateAt],
   );
 
-  /**
-   * Editing a user message rewrites history from that point: the edited turn
-   * stays, everything after it is replaced by a fresh response.
-   */
   const editMessage = useCallback(
     (messageId: string, content: string) => {
       const current = conversationRef.current;
@@ -382,24 +438,22 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       const next: Conversation = {
         ...current,
-        title: index === 0 ? service.titleForFirstMessage(trimmed) : current.title,
+        title: index === 0 ? deriveTitle(trimmed) : current.title,
         updatedAt: Date.now(),
         messages: [...kept, edited, assistantMessage],
       };
 
-      commitConversation(next);
+      setConversation(next);
       variants.current.set(assistantMessage.id, 0);
       runStream(next, assistantMessage.id, trimmed, 0);
     },
-    [commitConversation, isStreaming, runStream],
+    [isStreaming, runStream],
   );
 
-  const setFeedback = useCallback(
-    (messageId: string, feedback: MessageFeedback) => {
-      const current = conversationRef.current;
-      if (!current) return;
-
-      const next: Conversation = {
+  const setFeedback = useCallback((messageId: string, feedback: MessageFeedback) => {
+    setConversation((current) => {
+      if (!current) return current;
+      return {
         ...current,
         messages: current.messages.map((message) =>
           message.id === messageId
@@ -407,24 +461,30 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
             : message,
         ),
       };
-      commitConversation(next);
-    },
-    [commitConversation],
-  );
+    });
+  }, []);
 
   /* ── management ──────────────────────────────────────────────────────── */
+
+  const updateConversationFields = useCallback(
+    async (
+      id: string,
+      body: { title?: string; isPinned?: boolean; isArchived?: boolean },
+    ) => {
+      const res = await api.put<ApiEnvelope<ApiConversation>>(
+        `${CONVERSATIONS_API}/${id}`,
+        body,
+      );
+      invalidateConversations();
+      return res.data.data;
+    },
+    [invalidateConversations],
+  );
 
   const rename = useCallback(
     async (id: string, title: string) => {
       try {
-        const updated = await service.renameConversation(id, title);
-        setConversations((current) =>
-          current.map((entry) =>
-            entry.id === id
-              ? { ...entry, title: updated.title, updatedAt: updated.updatedAt }
-              : entry,
-          ),
-        );
+        const updated = await updateConversationFields(id, { title });
         setConversation((current) =>
           current?.id === id ? { ...current, title: updated.title } : current,
         );
@@ -437,29 +497,33 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         });
       }
     },
-    [toast],
+    [toast, updateConversationFields],
+  );
+
+  const leaveIfActive = useCallback(
+    (id: string) => {
+      if (conversationRef.current?.id !== id) return;
+      streamRef.current?.stop();
+      streamRef.current = null;
+      setIsStreaming(false);
+      openConversation(null);
+      router.push(ROUTES.CHAT);
+    },
+    [openConversation, router],
   );
 
   const remove = useCallback(
     async (id: string) => {
       const removed = conversations.find((entry) => entry.id === id);
-      setConversations((current) => current.filter((entry) => entry.id !== id));
 
       try {
-        await service.deleteConversation(id);
+        await deleteConversationApi(id);
       } catch {
-        void refreshHistory();
         toast({ title: "Could not delete conversation", variant: "error" });
         return;
       }
 
-      if (conversationRef.current?.id === id) {
-        streamRef.current?.stop();
-        streamRef.current = null;
-        setIsStreaming(false);
-        openConversation(null);
-        router.push("/chat");
-      }
+      leaveIfActive(id);
 
       toast({
         title: "Conversation deleted",
@@ -467,10 +531,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         variant: "default",
       });
     },
-    [conversations, openConversation, refreshHistory, router, toast],
+    [conversations, deleteConversationApi, leaveIfActive, toast],
   );
 
-  // A navigation away mid-stream must not leave a timer running.
   useEffect(() => () => streamRef.current?.stop(), []);
 
   const value = useMemo<ChatContextValue>(
@@ -493,6 +556,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       startNewChat,
       rename,
       remove,
+      leaveIfActive,
     }),
     [
       conversations,
@@ -512,6 +576,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       startNewChat,
       rename,
       remove,
+      leaveIfActive,
     ],
   );
 

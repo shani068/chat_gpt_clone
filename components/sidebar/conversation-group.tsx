@@ -10,26 +10,34 @@ import { ConversationItem } from "./conversation-item";
  */
 export function ConversationGroup({
   group,
+  heading,
   activeId,
   alwaysShowActions,
   onRename,
   onDelete,
+  onArchived,
   onNavigate,
 }: {
   group: ConversationGroupModel;
+  /** Optional override for the section caption (e.g. "Pinned"). */
+  heading?: string;
   activeId: string | null;
   alwaysShowActions: boolean;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  onArchived?: (id: string) => void;
   onNavigate?: () => void;
 }) {
+  const label = heading ?? group.bucket;
+  const headingId = `group-${label.replace(/\s+/g, "-")}`;
+
   return (
-    <section aria-labelledby={`group-${group.bucket.replace(/\s+/g, "-")}`}>
+    <section aria-labelledby={headingId}>
       <h3
-        id={`group-${group.bucket.replace(/\s+/g, "-")}`}
+        id={headingId}
         className="text-caption text-muted-foreground/80 px-3 pt-3 pb-1 font-medium tracking-[0.07em] uppercase"
       >
-        {group.bucket}
+        {label}
       </h3>
 
       <ul className="space-y-px">
@@ -41,6 +49,7 @@ export function ConversationGroup({
               alwaysShowActions={alwaysShowActions}
               onRename={onRename}
               onDelete={onDelete}
+              onArchived={onArchived}
               onNavigate={onNavigate}
             />
           </li>

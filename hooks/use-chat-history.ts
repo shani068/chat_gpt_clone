@@ -19,6 +19,7 @@ export function useChatHistory() {
     startNewChat,
     rename,
     remove,
+    leaveIfActive,
   } = useChatContext();
 
   const [query, setQuery] = useState("");
@@ -28,10 +29,21 @@ export function useChatHistory() {
     [conversations, query],
   );
 
-  const groups = useMemo(() => groupConversations(filtered), [filtered]);
+  const pinned = useMemo(
+    () => filtered.filter((conversation) => conversation.isPinned),
+    [filtered],
+  );
+
+  const unpinned = useMemo(
+    () => filtered.filter((conversation) => !conversation.isPinned),
+    [filtered],
+  );
+
+  const groups = useMemo(() => groupConversations(unpinned), [unpinned]);
 
   return {
     conversations,
+    pinned,
     groups,
     query,
     setQuery,
@@ -44,5 +56,6 @@ export function useChatHistory() {
     startNewChat,
     rename,
     remove,
+    leaveIfActive,
   };
 }

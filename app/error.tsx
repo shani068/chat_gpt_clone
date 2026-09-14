@@ -32,7 +32,7 @@ export default function GlobalError({ error, reset }: ErrorProps) {
 
         <div className="mt-2 flex justify-center">
           <Button variant="ghost" size="sm" asChild>
-            <Link href={ROUTES.CHAT}>Back to chat</Link>
+            <Link href={ROUTES.CHAT_ENTRY}>Back to chat</Link>
           </Button>
         </div>
       </div>

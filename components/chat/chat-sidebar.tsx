@@ -45,12 +45,14 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
   const {
     groups,
+    pinned,
     status,
     isEmpty,
     activeId,
     startNewChat,
     rename,
     remove,
+    leaveIfActive,
     refreshHistory,
     conversations,
   } = useChatHistory();
@@ -190,13 +192,13 @@ export function ChatSidebar({
           isCollapsed && "invisible",
         )}
       >
-        {status === "loading" ? (
+        {status === "loading" || status === "idle" ? (
           <ConversationListSkeleton />
         ) : status === "error" ? (
           <ErrorState
             compact
             title="Could not load history"
-            description="Your conversations are stored in this browser."
+            description="Check your connection and try again."
             onRetry={() => void refreshHistory()}
           />
         ) : isEmpty ? (
@@ -205,20 +207,35 @@ export function ChatSidebar({
             title="No conversations yet"
             description="Your chats will appear here once you send a first message."
           />
-        ) : groups.length === 0 ? (
+        ) : groups.length === 0 && pinned.length === 0 ? (
           <EmptyState compact title="No matches" description="Try a different search." />
         ) : (
-          groups.map((group) => (
-            <ConversationGroup
-              key={group.bucket}
-              group={group}
-              activeId={activeId}
-              alwaysShowActions={isDrawer}
-              onRename={(id, title) => void rename(id, title)}
-              onDelete={(id) => void remove(id)}
-              onNavigate={onNavigate}
-            />
-          ))
+          <>
+            {pinned.length > 0 ? (
+              <ConversationGroup
+                heading="Pinned"
+                group={{ bucket: "Today", conversations: pinned }}
+                activeId={activeId}
+                alwaysShowActions={isDrawer}
+                onRename={(id, title) => void rename(id, title)}
+                onDelete={(id) => void remove(id)}
+                onArchived={leaveIfActive}
+                onNavigate={onNavigate}
+              />
+            ) : null}
+            {groups.map((group) => (
+              <ConversationGroup
+                key={group.bucket}
+                group={group}
+                activeId={activeId}
+                alwaysShowActions={isDrawer}
+                onRename={(id, title) => void rename(id, title)}
+                onDelete={(id) => void remove(id)}
+                onArchived={leaveIfActive}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </>
         )}
       </div>
 
@@ -227,7 +244,7 @@ export function ChatSidebar({
         {!isCollapsed && conversations.length > 0 ? (
           <p className="text-muted-foreground/70 px-1.5 pb-1.5 text-[0.6875rem]">
             {conversations.length}{" "}
-            {conversations.length === 1 ? "conversation" : "conversations"} stored locally
+            {conversations.length === 1 ? "conversation" : "conversations"}
           </p>
         ) : null}
 

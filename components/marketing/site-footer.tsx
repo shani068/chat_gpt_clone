@@ -17,7 +17,7 @@ const COLUMNS: { heading: string; links: { label: string; href: string }[] }[] =
   {
     heading: "Application",
     links: [
-      { label: "Start chatting", href: ROUTES.CHAT },
+      { label: "Start chatting", href: ROUTES.CHAT_ENTRY },
       { label: "Settings", href: ROUTES.SETTINGS },
       { label: "Sign in", href: ROUTES.LOGIN },
     ],

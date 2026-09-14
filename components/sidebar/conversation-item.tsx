@@ -4,8 +4,9 @@ import Link from "next/link";
 
 import { useEffect, useRef, useState } from "react";
 
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Archive, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 
+import { useToast } from "@/components/shared/toast-provider";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,7 +20,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { CONVERSATIONS_API, conversationRoute } from "@/constants/routes";
+import { usePut } from "@/hooks/useApi";
 import { formatRelativeTime } from "@/lib/chat/chat-utils";
+import type { ApiConversation, ApiEnvelope } from "@/types/api";
 import type { ConversationSummary } from "@/types/chat";
 import { cn } from "@/utils/cn";
 
@@ -30,6 +34,7 @@ interface ConversationItemProps {
   alwaysShowActions: boolean;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  onArchived?: (id: string) => void;
   onNavigate?: () => void;
 }
 
@@ -39,13 +44,37 @@ export function ConversationItem({
   alwaysShowActions,
   onRename,
   onDelete,
+  onArchived,
   onNavigate,
 }: ConversationItemProps) {
+  const { toast } = useToast();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [draft, setDraft] = useState(conversation.title);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const { mutate: updateConversation, isPending: isUpdating } = usePut<
+    ApiEnvelope<ApiConversation>,
+    { title?: string; isPinned?: boolean; isArchived?: boolean }
+  >(`${CONVERSATIONS_API}/${conversation.id}`, {
+    invalidateKeys: [["conversations"]],
+    onSuccess: (res) => {
+      const updated = res.data;
+      if (updated.isArchived) {
+        onArchived?.(conversation.id);
+        toast({ title: "Chat archived", variant: "success" });
+        return;
+      }
+      toast({
+        title: updated.isPinned ? "Chat pinned" : "Chat unpinned",
+        variant: "success",
+      });
+    },
+    onError: (error) => {
+      toast({ title: error, variant: "error" });
+    },
+  });
 
   useEffect(() => {
     if (isRenaming) {
@@ -91,6 +120,8 @@ export function ConversationItem({
     );
   }
 
+  const isPinned = Boolean(conversation.isPinned);
+
   return (
     <>
       <div
@@ -107,12 +138,12 @@ export function ConversationItem({
         ) : null}
 
         <Link
-          href={`/chat/${conversation.id}`}
+          href={conversationRoute(conversation.id)}
           onClick={onNavigate}
           aria-current={isActive ? "page" : undefined}
           title={conversation.title}
           className={cn(
-            "flex h-8 min-w-0 flex-1 items-center rounded-md pl-2 pr-1 text-small",
+            "flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md pl-2 pr-1 text-small",
             "transition-colors duration-[120ms]",
             isActive
               ? "bg-muted font-medium text-foreground"
@@ -120,66 +151,93 @@ export function ConversationItem({
             "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
           )}
         >
-          <span className="truncate">{conversation.title}</span>
-        </Link>
+              {isPinned ? (
+                <Pin
+                  size={12}
+                  strokeWidth={2}
+                  className="text-muted-foreground shrink-0"
+                  aria-hidden
+                />
+              ) : null}
+              <span className="truncate">{conversation.title}</span>
+            </Link>
 
-        <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={`Actions for ${conversation.title}`}
-              className={cn(
-                "inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground",
-                "transition-[opacity,background-color,color] duration-[120ms]",
-                "hover:bg-border/70 hover:text-foreground",
-                "focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
-                alwaysShowActions || isMenuOpen
-                  ? "opacity-100"
-                  : "opacity-0 group-hover/row:opacity-100",
-              )}
-            >
-              <MoreHorizontal size={14} strokeWidth={2} aria-hidden />
-            </button>
-          </DropdownMenuTrigger>
+            <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Actions for ${conversation.title}`}
+                  disabled={isUpdating}
+                  className={cn(
+                    "inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+                    "transition-[opacity,background-color,color] duration-[120ms]",
+                    "hover:bg-border/70 hover:text-foreground",
+                    "focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
+                    alwaysShowActions || isMenuOpen
+                      ? "opacity-100"
+                      : "opacity-0 group-hover/row:opacity-100",
+                  )}
+                >
+                  <MoreHorizontal size={14} strokeWidth={2} aria-hidden />
+                </button>
+              </DropdownMenuTrigger>
 
-          <DropdownMenuContent align="end" className="min-w-[11rem]">
-            <div className="px-2 pt-1 pb-1.5">
-              <p className="text-caption text-foreground truncate font-medium">
-                {conversation.title}
-              </p>
-              <p className="text-muted-foreground text-[0.6875rem]">
-                {conversation.messageCount} messages ·{" "}
-                {formatRelativeTime(conversation.updatedAt)}
-              </p>
-            </div>
+              <DropdownMenuContent align="end" className="min-w-[11rem]">
+                <div className="px-2 pt-1 pb-1.5">
+                  <p className="text-caption text-foreground truncate font-medium">
+                    {conversation.title}
+                  </p>
+                  <p className="text-muted-foreground text-[0.6875rem]">
+                    {formatRelativeTime(conversation.updatedAt)}
+                  </p>
+                </div>
 
-            <DropdownMenuItem
-              onSelect={() => {
-                setDraft(conversation.title);
-                // Defer so the menu can close before focus moves to the input.
-                setTimeout(() => setIsRenaming(true), 0);
-              }}
-            >
-              <Pencil size={14} strokeWidth={2} aria-hidden />
-              Rename
-            </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={isUpdating}
+                  onSelect={() => updateConversation({ isPinned: !isPinned })}
+                >
+                  {isPinned ? (
+                    <PinOff size={14} strokeWidth={2} aria-hidden />
+                  ) : (
+                    <Pin size={14} strokeWidth={2} aria-hidden />
+                  )}
+                  {isPinned ? "Unpin Chat" : "Pin Chat"}
+                </DropdownMenuItem>
 
-            <DropdownMenuItem
-              tone="destructive"
-              onSelect={() => setTimeout(() => setIsConfirmingDelete(true), 0)}
-            >
-              <Trash2 size={14} strokeWidth={2} aria-hidden />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+                <DropdownMenuItem
+                  disabled={isUpdating}
+                  onSelect={() => updateConversation({ isArchived: true })}
+                >
+                  <Archive size={14} strokeWidth={2} aria-hidden />
+                  Archive
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onSelect={() => {
+                    setDraft(conversation.title);
+                    setTimeout(() => setIsRenaming(true), 0);
+                  }}
+                >
+                  <Pencil size={14} strokeWidth={2} aria-hidden />
+                  Rename
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  tone="destructive"
+                  onSelect={() => setTimeout(() => setIsConfirmingDelete(true), 0)}
+                >
+                  <Trash2 size={14} strokeWidth={2} aria-hidden />
+                  Delete Chat
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
 
       <Dialog open={isConfirmingDelete} onOpenChange={setIsConfirmingDelete}>
         <DialogContent className="sm:w-[26rem]">
           <DialogHeader
             title="Delete conversation?"
-            description={`"${conversation.title}" and its ${conversation.messageCount} messages will be removed. This cannot be undone.`}
+            description={`"${conversation.title}" will be permanently deleted. This cannot be undone.`}
           />
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsConfirmingDelete(false)}>
@@ -192,7 +250,7 @@ export function ConversationItem({
                 onDelete(conversation.id);
               }}
             >
-              Delete conversation
+              Delete Chat
             </Button>
           </DialogFooter>
         </DialogContent>

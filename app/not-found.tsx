@@ -26,7 +26,7 @@ export default function NotFound() {
 
         <div className="mt-7 flex items-center justify-center gap-2">
           <Button variant="primary" size="md" asChild>
-            <Link href={ROUTES.CHAT}>Go to chat</Link>
+            <Link href={ROUTES.CHAT_ENTRY}>Go to chat</Link>
           </Button>
           <Button variant="ghost" size="md" asChild>
             <Link href={ROUTES.HOME}>Home</Link>

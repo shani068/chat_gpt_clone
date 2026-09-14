@@ -4,7 +4,7 @@ import { getSessionCookie } from "better-auth/cookies";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:4000";
 
-const PROTECTED_PREFIXES = ["/chat", "/settings", "/dashboard"];
+const PROTECTED_PREFIXES = ["/c", "/chat", "/settings", "/dashboard"];
 const AUTH_PAGES = ["/login", "/register"];
 
 const matches = (pathname: string, prefixes: string[]) =>
@@ -45,12 +45,20 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isAuthPage && authenticated) {
-    return NextResponse.redirect(new URL("/chat", request.url));
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/chat/:path*", "/settings/:path*", "/dashboard/:path*", "/login", "/register"],
+  matcher: [
+    "/c/:path*",
+    "/chat",
+    "/chat/:path*",
+    "/settings/:path*",
+    "/dashboard/:path*",
+    "/login",
+    "/register",
+  ],
 };
