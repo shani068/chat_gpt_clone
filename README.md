@@ -1,141 +1,123 @@
-# ChatGPT
+# ChatGPT Frontend
 
-A production-quality frontend for an AI assistant — conversation history, simulated
-token streaming, file analysis, markdown and code rendering, and a settings layer
-that actually persists.
+Next.js client for a ChatGPT-style AI assistant. Authenticated users get a full chat shell with streaming replies, conversation history, and settings. Guests land on a marketing page.
 
-Every interaction in the product is real. The model responses are simulated behind
-a service boundary that mirrors the shape of a real completions API, so connecting
-a backend means replacing one file.
+The browser talks only to this app’s origin. Auth, conversations, messages, and chat streaming are proxied to the Express backend via `/api/*`.
 
-```
-npm install     # or: bun install
-npm run dev     # http://localhost:3000
-```
+## Stack
 
-## Routes
-
-| Route | What it is |
+| Technology | Role |
 | --- | --- |
-| `/` | Marketing page, built from the application's own components |
-| `/chat` | A new conversation |
-| `/chat/[chatId]` | An existing conversation |
-| `/settings` | Full-page settings (same sections as the in-app dialog) |
-| `/login`, `/register` | Mock authentication |
+| Next.js 16 (App Router) | UI, routing, API rewrite proxy |
+| React 19 + TypeScript | Application layer |
+| Tailwind CSS v4 | Design tokens and styling |
+| Better Auth | Email/password and Google OAuth (client) |
+| TanStack Query + Axios | REST (conversations, messages, profile) |
+| Vercel AI SDK (`ai`) | UI message streaming transport |
+| Radix UI + lucide-react | Accessible primitives and icons |
+| react-markdown + remark-gfm + rehype-highlight | Markdown and code blocks |
+| Framer Motion | Motion |
+| next-themes | Light / dark theme |
+| React Hook Form + Zod | Auth forms |
 
-## What works
+## Prerequisites
 
-**Conversations** — create, open, rename, delete, and search. History is grouped
-into Today / Yesterday / Previous 7 days / Older and persisted to `localStorage`
-behind a service abstraction.
+- [Bun](https://bun.sh) (preferred; `bun.lock` is the lockfile) or Node.js 20+
+- Running backend from [`chat_gpt_backend`](../chat_gpt_backend) on port **4000**
+- PostgreSQL and OpenAI configured on the backend
 
-**Streaming** — responses arrive token by token with word-aware chunking and
-pauses at sentence and block boundaries, so the cadence reads like generation
-rather than a progress bar. Stop halts it on the frame you press it; the partial
-answer stays on screen.
+## Getting started
 
-**Message actions** — copy, regenerate, thumbs up/down, and inline editing of a
-user message (which rewrites the response below it). Actions reveal on hover on
-pointer devices and stay visible on touch.
+```bash
+cd chat_gpt_project
+bun install
+cp .env.example .env.local
+# set BACKEND_URL if the API is not on http://localhost:4000
+bun run dev
+```
 
-**Rich content** — GitHub-flavoured markdown with syntax-highlighted code blocks,
-per-block copy, horizontally scrolling tables, and long URLs that cannot break the
-layout. Only nine highlight.js grammars are registered, so the client bundle does
-not carry 190 of them.
+App: [http://localhost:3000](http://localhost:3000)
 
-**Attachments** — PDF, TXT, DOCX, PNG, JPG, CSV and JSON, validated for type and
-size before a simulated resumable upload, with pending / uploading / uploaded /
-error states, drag-and-drop, and paste.
-
-**Settings** — theme, Enter-key behaviour, streaming, auto-scroll,
-message actions, data export and deletion. All persisted locally.
-
-## Keyboard
-
-| | |
+| Script | Description |
 | --- | --- |
-| `⌘/Ctrl + K` | Search conversations |
-| `⌘/Ctrl + ⇧ + O` | New chat |
-| `⌘/Ctrl + Enter` | Send |
-| `⌘/Ctrl + B` | Toggle sidebar |
-| `⌘/Ctrl + ,` | Settings |
-| `/` | Focus composer |
-| `Esc` | Close dialog, menu or drawer |
+| `bun run dev` | Dev server (webpack) |
+| `bun run dev:turbo` | Dev server (Turbopack) |
+| `bun run dev:clean` | Clear `.next`, then start webpack dev |
+| `bun run build` | Production build |
+| `bun start` | Serve production build |
+| `bun run lint` | ESLint |
 
-Modifier keys resolve per platform, so every binding works on macOS and Windows.
+## Environment
 
-## Design system
+| Variable | Required | Description |
+| --- | --- | --- |
+| `BACKEND_URL` | Yes | Express API origin used by Next rewrites (default `http://localhost:4000`) |
+| `NEXT_PUBLIC_API_URL` | No | Axios base URL; defaults to `http://localhost:3000` so requests stay same-origin and cookies work |
 
-Dark is the primary experience; light is a first-class peer. Both resolve from one
-set of HSL custom properties in [`app/globals.css`](app/globals.css) — no component
-declares a colour of its own.
-
-- **Type scale** — display / h1 / h2 / h3 / body / chat / small / caption / code,
-  defined as Tailwind v4 theme tokens rather than ad-hoc sizes
-- **Radius** — 6 / 8 / 10 / 12px; controls sit at 8–10px
-- **Elevation** — surface contrast and hairlines do the work; shadows are reserved
-  for dialogs, popovers, the composer and the command menu
-- **Motion** — one easing curve (`cubic-bezier(0.22, 1, 0.36, 1)`) and four
-  durations, with `prefers-reduced-motion` removing non-essential animation rather
-  than shortening it
-
-UI primitives are built on Radix and styled from scratch — no untouched defaults.
-
-## Accessibility
-
-Visible focus on every interactive element, semantic buttons throughout, labelled
-icon buttons, `aria-expanded` / `aria-selected` / `aria-current` where they apply,
-and a command menu driven by `aria-activedescendant` so focus stays in the input.
-
-The transcript is a `role="log"` region with live announcements switched **off**,
-because announcing every streamed token is unusable. A separate visually hidden
-status region reports when generation starts and finishes.
+Do not expose backend secrets or `OPENAI_API_KEY` in this project. The browser must never call the Express origin directly for auth/cookies.
 
 ## Architecture
 
 ```
-app/                    routes (App Router)
-components/
-  chat/                 shell, sidebar, header, message list, composer, markdown
-  sidebar/              conversation rows, grouping, ⌘K search, user menu
-  settings/             dialog, sections, full-page variant
-  shared/               logo, theme toggle, toasts, empty/error/loading states
-  ui/                   button, icon button, input, dialog, dropdown, popover…
-  marketing/            hero, feature grid, product preview, CTA, footer
-hooks/                  use-chat, use-chat-history, use-auto-scroll, shortcuts…
-lib/chat/               mock service, chat utils, markdown config, attachments
-providers/              chat, preferences, session, toasts, theme
-types/                  chat, file, user
+Browser (localhost:3000)
+  └── /api/*  ──rewrite──►  Express (localhost:4000)
+        ├── /api/auth/*          Better Auth
+        ├── /api/v1/conversations
+        ├── /api/v1/messages
+        └── /api/chat            Streaming completions
 ```
 
-State is split by concern: `ChatProvider` owns conversations and generation,
-`PreferencesProvider` owns settings, `SessionProvider` owns the mock user, and
-`next-themes` owns the theme — one source of truth each.
+- **`next.config.ts`** — rewrites `/api/:path*` to `${BACKEND_URL}/api/:path*`
+- **`proxy.ts`** — session gate for `/c`, `/chat`, `/settings`, `/dashboard`; redirects signed-in users away from auth pages
+- **`lib/auth-client.ts`** — Better Auth client (same-origin `/api/auth/*`)
+- **`providers/chat-provider.tsx`** — conversations and stream orchestration
+- **`lib/chat/stream-chat.ts`** — `POST /api/chat` streaming transport
 
-### Connecting a real backend
+## Routes
 
-[`lib/chat/mock-chat-service.ts`](lib/chat/mock-chat-service.ts) is the only module
-that knows the data is fake. It exposes the functions a real client would:
+| Route | Description |
+| --- | --- |
+| `/` | Marketing (signed out) or chat home (signed in) |
+| `/c/[conversationId]` | Active conversation |
+| `/chat`, `/chat/[chatId]` | Legacy redirects → `/` or `/c/:id` |
+| `/login`, `/register` | Email/password and Google sign-in |
+| `/settings` | Full-page settings |
 
-```ts
-getConversations()  getConversation(id)  createConversation()
-renameConversation(id, title)  deleteConversation(id)  saveConversation(c)
-streamAssistantResponse(options, callbacks)  uploadFile(file, onProgress)
+## Features
+
+- **Auth** — email/password and Google OAuth via Better Auth (httpOnly session cookies)
+- **Streaming chat** — token stream from the backend; stop, regenerate, retry, and edit user messages
+- **Conversations** — create, open, rename, pin, archive, delete; sidebar search (`⌘/Ctrl + K`)
+- **Rich replies** — GitHub-flavoured markdown, syntax-highlighted code, copy actions
+- **Settings** — theme, composer behaviour, streaming and UI preferences (dialog + `/settings`)
+- **Keyboard shortcuts** — new chat, search, send, sidebar, settings, focus composer
+
+### Local-only leftovers
+
+Preferences persistence, simulated file upload, and settings export/clear still use local helpers under `lib/chat/`. Conversation history and generation are backed by the API.
+
+## Project structure
+
+```
+app/                 # App Router pages and layouts
+components/          # chat, sidebar, settings, marketing, auth, ui
+constants/           # routes and shared config
+hooks/               # data fetching, chat UX, shortcuts
+lib/                 # api client, auth client, chat streaming
+providers/           # session, chat, preferences, query, theme
+types/               # shared TypeScript types
+proxy.ts             # auth route protection
+next.config.ts       # /api rewrite to BACKEND_URL
 ```
 
-No component reads `localStorage` or calls `setTimeout` to fake latency. Replace
-the bodies with `fetch` and the UI is unchanged.
+## Pairing with the backend
 
-## Stack
+1. Start PostgreSQL and configure `chat_gpt_backend` (see its README).
+2. Run the API: `bun run dev` in `chat_gpt_backend` → port **4000**.
+3. Set `BACKEND_URL=http://localhost:4000` in this app’s `.env.local`.
+4. Set the backend `BETTER_AUTH_URL=http://localhost:3000` so cookies and OAuth callbacks match the Next origin.
+5. For Google OAuth, authorize `http://localhost:3000/api/auth/callback/google`.
 
-Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · Radix UI ·
-Framer Motion · lucide-react · react-markdown + remark-gfm + rehype-highlight ·
-React Hook Form + Zod · next-themes
+## License
 
-## Notes
-
-- Simulated generation fails roughly 1 time in 50 so the inline error and retry
-  path is reachable in normal use. Sending a message starting with `/error`
-  forces it deterministically.
-- Conversations live in `localStorage` under `chatgpt.*` keys. Nothing is sent
-  anywhere.
+Private / unlicensed unless otherwise stated.
