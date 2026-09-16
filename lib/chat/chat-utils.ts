@@ -129,13 +129,32 @@ export function apiMessageToMessage(message: ApiMessage): Message {
         ? ("streaming" as const)
         : ("idle" as const);
 
+  const contentFromParts = textFromStoredParts(message.parts);
+
   return {
     id: message.id,
     role,
-    content: message.content,
+    content: contentFromParts || message.content,
     createdAt: new Date(message.createdAt).getTime(),
     status: status === "streaming" ? "idle" : status,
   };
+}
+
+function textFromStoredParts(parts: unknown): string {
+  if (!Array.isArray(parts)) return "";
+
+  return parts
+    .filter(
+      (part): part is { type: "text"; text: string } =>
+        typeof part === "object" &&
+        part !== null &&
+        "type" in part &&
+        (part as { type: unknown }).type === "text" &&
+        "text" in part &&
+        typeof (part as { text: unknown }).text === "string",
+    )
+    .map((part) => part.text)
+    .join("");
 }
 
 function previewOf(message: Message): string {

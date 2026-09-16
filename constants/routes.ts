@@ -15,6 +15,7 @@ export const ROUTES = {
 
 export const CONVERSATIONS_API = "/api/v1/conversations" as const;
 export const MESSAGES_API = "/api/v1/messages" as const;
+export const CHAT_API = "/api/chat" as const;
 
 export const conversationRoute = (id: string) => `/c/${id}` as const;
 

@@ -12,18 +12,29 @@ import {
   useState,
 } from "react";
 
+import type { UIMessage } from "ai";
+
 import { useToast } from "@/components/shared/toast-provider";
-import { CONVERSATIONS_API, MESSAGES_API, ROUTES, conversationRoute } from "@/constants/routes";
+import {
+  CONVERSATIONS_API,
+  MESSAGES_API,
+  ROUTES,
+  conversationRoute,
+} from "@/constants/routes";
 import { useDelete, usePost } from "@/hooks/useApi";
 import { useFetch } from "@/hooks/useFetch";
 import { api } from "@/lib/api";
 import {
   apiConversationToSummary,
   apiMessageToMessage,
+  createId,
   deriveTitle,
 } from "@/lib/chat/chat-utils";
-import * as service from "@/lib/chat/mock-chat-service";
-import { usePreferences } from "@/providers/preferences-provider";
+import {
+  streamChatResponse,
+  textFromUiMessage,
+  toUiMessage,
+} from "@/lib/chat/stream-chat";
 import { useSession } from "@/providers/session-provider";
 import type { ApiConversation, ApiEnvelope, ApiMessage } from "@/types/api";
 import type {
@@ -31,26 +42,22 @@ import type {
   ConversationSummary,
   Message,
   MessageFeedback,
-  StreamHandle,
 } from "@/types/chat";
 import type { Attachment } from "@/types/file";
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 
 interface ChatContextValue {
-  /* history */
   conversations: ConversationSummary[];
   historyStatus: LoadStatus;
   refreshHistory: () => Promise<void>;
 
-  /* active conversation */
   activeId: string | null;
   conversation: Conversation | null;
   messages: Message[];
   conversationStatus: LoadStatus;
   openConversation: (id: string | null) => void;
 
-  /* generation */
   isStreaming: boolean;
   sendMessage: (content: string, attachments?: Attachment[]) => Promise<void>;
   stopGeneration: () => void;
@@ -59,20 +66,30 @@ interface ChatContextValue {
   editMessage: (messageId: string, content: string) => void;
   setFeedback: (messageId: string, feedback: MessageFeedback) => void;
 
-  /* conversation management */
   startNewChat: () => void;
   rename: (id: string, title: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
-  /** Clear the active thread if it was archived/deleted from the sidebar. */
   leaveIfActive: (id: string) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
+function domainToUiMessages(messages: Message[]): UIMessage[] {
+  return messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .filter((message) => message.status !== "error" || message.content.length > 0)
+    .map((message) =>
+      toUiMessage({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+      }),
+    );
+}
+
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { toast } = useToast();
-  const { preferences } = usePreferences();
   const { status: sessionStatus } = useSession();
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -80,12 +97,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
 
-  const streamRef = useRef<StreamHandle | null>(null);
-  const variants = useRef(new Map<string, number>());
+  const abortRef = useRef<AbortController | null>(null);
   const conversationRef = useRef<Conversation | null>(null);
   conversationRef.current = conversation;
-
-  /* ── history (Conversation API) ──────────────────────────────────────── */
 
   const {
     data: listResponse,
@@ -130,17 +144,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     invalidateKeys: [["conversations"]],
   });
 
-  const { mutateAsync: createMessageApi } = usePost<
-    ApiEnvelope<ApiMessage>,
-    { conversationId: string; role: "USER" | "ASSISTANT"; content: string; status?: "COMPLETE" | "PENDING" | "ERROR" }
-  >(MESSAGES_API);
-
   const { mutateAsync: deleteConversationApi } = useDelete<ApiEnvelope<null>>(
     CONVERSATIONS_API,
     { invalidateKeys: [["conversations"]] },
   );
-
-  /* ── routing ─────────────────────────────────────────────────────────── */
 
   const openConversation = useCallback((id: string | null) => {
     if (id === null) {
@@ -150,7 +157,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Already open (e.g. we just created it) — do not clobber live state.
     if (conversationRef.current?.id === id) {
       setActiveId(id);
       setConversationStatus("ready");
@@ -188,92 +194,123 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const startNewChat = useCallback(() => {
-    streamRef.current?.stop();
-    streamRef.current = null;
+    abortRef.current?.abort();
+    abortRef.current = null;
     setIsStreaming(false);
     openConversation(null);
     router.push(ROUTES.CHAT);
   }, [openConversation, router]);
 
-  /* ── generation ──────────────────────────────────────────────────────── */
-
   const runStream = useCallback(
-    (target: Conversation, assistantId: string, prompt: string, variant: number) => {
+    async (target: Conversation, userMessage: Message, assistantId: string) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
       setIsStreaming(true);
 
-      const attachmentNames =
-        target.messages
-          .filter((message) => message.role === "user")
-          .at(-1)
-          ?.attachments?.map((file) => file.name) ?? [];
+      const uiHistory = [
+        ...domainToUiMessages(
+          target.messages.filter(
+            (message) => message.id !== assistantId && message.id !== userMessage.id,
+          ),
+        ),
+        toUiMessage({
+          id: userMessage.id,
+          role: "user",
+          content: userMessage.content,
+        }),
+      ];
 
-      const patch = (updater: (message: Message) => Message) => {
+      const patchAssistantByPlaceholder = (updater: (message: Message) => Message) => {
+        setConversation((current) => {
+          if (current?.id !== target.id) return current;
+
+          let matched = false;
+          const messages = current.messages.map((message) => {
+            if (
+              !matched &&
+              (message.id === assistantId || message.status === "streaming")
+            ) {
+              matched = true;
+              return updater(message);
+            }
+            return message;
+          });
+
+          return { ...current, messages };
+        });
+      };
+
+      try {
+        const finalMessage = await streamChatResponse({
+          conversationId: target.id,
+          messages: uiHistory,
+          abortSignal: controller.signal,
+          onAssistantUpdate: (uiMessage, text) => {
+            patchAssistantByPlaceholder((message) => ({
+              ...message,
+              id: uiMessage.id || message.id,
+              content: text,
+              status: "streaming",
+              error: undefined,
+            }));
+          },
+        });
+
+        const finalText = textFromUiMessage(finalMessage);
+
         setConversation((current) => {
           if (current?.id !== target.id) return current;
           return {
             ...current,
+            updatedAt: Date.now(),
+            title:
+              current.title === "New Chat" || current.title === "New conversation"
+                ? deriveTitle(userMessage.content)
+                : current.title,
             messages: current.messages.map((message) =>
-              message.id === assistantId ? updater(message) : message,
+              message.id === assistantId ||
+              message.id === finalMessage.id ||
+              message.status === "streaming"
+                ? {
+                    ...message,
+                    id: finalMessage.id,
+                    content: finalText,
+                    status: "idle" as const,
+                    error: undefined,
+                  }
+                : message,
             ),
           };
         });
-      };
 
-      streamRef.current = service.streamAssistantResponse(
-        {
-          prompt,
-          variant,
-          attachmentNames,
-          shouldStream: preferences.chat.streamResponses,
-        },
-        {
-          onToken: (_chunk, full) => patch((message) => ({ ...message, content: full })),
+        invalidateConversations();
+      } catch (error) {
+        if (controller.signal.aborted) {
+          patchAssistantByPlaceholder((message) => ({
+            ...message,
+            status: "idle",
+            content: message.content || "_Generation stopped._",
+          }));
+          return;
+        }
 
-          onDone: (full) => {
-            streamRef.current = null;
-            setIsStreaming(false);
-            setConversation((current) => {
-              if (current?.id !== target.id) return current;
-              return {
-                ...current,
-                updatedAt: Date.now(),
-                messages: current.messages.map((message) =>
-                  message.id === assistantId
-                    ? { ...message, content: full, status: "idle" as const }
-                    : message,
-                ),
-              };
-            });
+        const reason =
+          error instanceof Error ? error.message : "The response could not be completed.";
 
-            void createMessageApi({
-              conversationId: target.id,
-              role: "ASSISTANT",
-              content: full,
-              status: "COMPLETE",
-            }).catch(() => {
-              /* Sidebar history already exists; assistant persistence is best-effort. */
-            });
-          },
-
-          onError: (reason) => {
-            streamRef.current = null;
-            setIsStreaming(false);
-            setConversation((current) => {
-              if (current?.id !== target.id) return current;
-              return {
-                ...current,
-                messages: current.messages.map((message) =>
-                  message.id === assistantId
-                    ? { ...message, status: "error" as const, error: reason }
-                    : message,
-                ),
-              };
-            });
-          },
-        },
-      );
+        patchAssistantByPlaceholder((message) => ({
+          ...message,
+          status: "error",
+          error: reason,
+        }));
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+        setIsStreaming(false);
+      }
     },
-    [createMessageApi, preferences.chat.streamResponses],
+    [invalidateConversations],
   );
 
   const sendMessage = useCallback(
@@ -283,12 +320,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       let target = conversationRef.current;
 
-      // First message of a brand-new chat creates the conversation via the API.
-      // History API replaceState avoids remounting the shell mid-stream.
       if (!target) {
         try {
           const created = await createConversationApi({
-            title: deriveTitle(trimmed),
+            title: "New Chat",
           });
           const row = created.data;
           target = {
@@ -311,15 +346,26 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      const userMessage = service.buildUserMessage(trimmed, attachments);
-      const assistantMessage = service.buildAssistantMessage();
+      const userMessage: Message = {
+        id: createId("msg"),
+        role: "user",
+        content: trimmed,
+        createdAt: Date.now(),
+        status: "idle",
+        attachments: attachments.length ? attachments : undefined,
+      };
+
+      const assistantMessage: Message = {
+        id: createId("msg"),
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+        status: "streaming",
+      };
 
       const next: Conversation = {
         ...target,
-        title:
-          target.messages.length === 0
-            ? deriveTitle(trimmed)
-            : target.title,
+        title: target.messages.length === 0 ? deriveTitle(trimmed) : target.title,
         updatedAt: Date.now(),
         messages: [...target.messages, userMessage, assistantMessage],
       };
@@ -327,27 +373,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       setConversation(next);
       conversationRef.current = next;
 
-      void createMessageApi({
-        conversationId: next.id,
-        role: "USER",
-        content: trimmed,
-        status: "COMPLETE",
-      }).catch(() => {
-        toast({
-          title: "Message may not have been saved",
-          variant: "error",
-        });
-      });
-
-      variants.current.set(assistantMessage.id, 0);
-      runStream(next, assistantMessage.id, trimmed, 0);
+      await runStream(next, userMessage, assistantMessage.id);
     },
-    [createConversationApi, createMessageApi, isStreaming, runStream, toast],
+    [createConversationApi, isStreaming, runStream, toast],
   );
 
   const stopGeneration = useCallback(() => {
-    streamRef.current?.stop();
-    streamRef.current = null;
+    abortRef.current?.abort();
+    abortRef.current = null;
     setIsStreaming(false);
 
     setConversation((current) => {
@@ -380,28 +413,31 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         .find((message) => message.role === "user");
       if (!prompt) return;
 
-      const variant = (variants.current.get(assistantId) ?? 0) + 1;
-      variants.current.set(assistantId, variant);
+      const userMessage: Message = {
+        ...prompt,
+        id: createId("msg"),
+        createdAt: Date.now(),
+        status: "idle",
+        edited: prompt.edited,
+      };
+
+      const assistantMessage: Message = {
+        id: createId("msg"),
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+        status: "streaming",
+      };
 
       const next: Conversation = {
         ...current,
         updatedAt: Date.now(),
-        messages: current.messages.map((message) =>
-          message.id === assistantId
-            ? {
-                ...message,
-                content: "",
-                status: "streaming" as const,
-                error: undefined,
-                feedback: null,
-                createdAt: Date.now(),
-              }
-            : message,
-        ),
+        messages: [...current.messages.slice(0, index), userMessage, assistantMessage],
       };
 
       setConversation(next);
-      runStream(next, assistantId, prompt.content, variant);
+      conversationRef.current = next;
+      void runStream(next, userMessage, assistantMessage.id);
     },
     [isStreaming, runStream],
   );
@@ -428,24 +464,33 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       const index = current.messages.findIndex((message) => message.id === messageId);
       if (index === -1) return;
 
-      const assistantMessage = service.buildAssistantMessage();
-      const kept = current.messages.slice(0, index);
-      const edited: Message = {
+      const userMessage: Message = {
         ...current.messages[index],
+        id: createId("msg"),
         content: trimmed,
         edited: true,
+        createdAt: Date.now(),
+        status: "idle",
+      };
+
+      const assistantMessage: Message = {
+        id: createId("msg"),
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+        status: "streaming",
       };
 
       const next: Conversation = {
         ...current,
         title: index === 0 ? deriveTitle(trimmed) : current.title,
         updatedAt: Date.now(),
-        messages: [...kept, edited, assistantMessage],
+        messages: [...current.messages.slice(0, index), userMessage, assistantMessage],
       };
 
       setConversation(next);
-      variants.current.set(assistantMessage.id, 0);
-      runStream(next, assistantMessage.id, trimmed, 0);
+      conversationRef.current = next;
+      void runStream(next, userMessage, assistantMessage.id);
     },
     [isStreaming, runStream],
   );
@@ -463,8 +508,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       };
     });
   }, []);
-
-  /* ── management ──────────────────────────────────────────────────────── */
 
   const updateConversationFields = useCallback(
     async (
@@ -503,8 +546,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const leaveIfActive = useCallback(
     (id: string) => {
       if (conversationRef.current?.id !== id) return;
-      streamRef.current?.stop();
-      streamRef.current = null;
+      abortRef.current?.abort();
+      abortRef.current = null;
       setIsStreaming(false);
       openConversation(null);
       router.push(ROUTES.CHAT);
@@ -534,7 +577,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [conversations, deleteConversationApi, leaveIfActive, toast],
   );
 
-  useEffect(() => () => streamRef.current?.stop(), []);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const value = useMemo<ChatContextValue>(
     () => ({
