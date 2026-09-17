@@ -72,9 +72,6 @@ export function Hero() {
             </Button>
           </motion.div>
 
-          <motion.p {...rise(0.24)} className="text-caption text-muted-foreground mt-4">
-            No account required — conversations stay in your browser.
-          </motion.p>
         </div>
 
         <motion.div

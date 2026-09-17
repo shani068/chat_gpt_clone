@@ -52,17 +52,15 @@ export function ThemeToggle({
             aria-label={label}
             onClick={() => setTheme(value)}
             className={cn(
-              "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-[140ms]",
-              size === "sm" ? "h-6 px-2 text-caption" : "h-7 px-2.5 text-caption",
+              "inline-flex min-w-0 flex-1 items-center justify-center rounded-md font-medium transition-colors duration-[140ms]",
+              size === "sm" ? "h-7 gap-1 px-1.5 text-caption" : "h-7 gap-1.5 px-2.5 text-caption",
               isSelected
                 ? "bg-card text-foreground shadow-e1"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <Icon size={14} strokeWidth={2} aria-hidden />
-            <span className={size === "sm" ? "sr-only sm:not-sr-only" : ""}>
-              {label}
-            </span>
+            <Icon size={14} strokeWidth={2} aria-hidden className="shrink-0" />
+            <span className="truncate">{label}</span>
           </button>
         );
       })}

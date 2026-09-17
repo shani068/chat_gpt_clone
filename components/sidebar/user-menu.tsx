@@ -72,7 +72,7 @@ export function UserMenu({
         </button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent side="top" align="start" className="w-[15.5rem]">
+      <DropdownMenuContent side="top" align="start" className="w-64">
         <div className="flex items-center gap-2.5 px-2 py-2">
           <Avatar name={name} src={user?.avatarUrl} size={32} />
           <div className="min-w-0 flex-1">
@@ -84,9 +84,9 @@ export function UserMenu({
 
         <DropdownMenuSeparator />
 
-        <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+        <div className="flex flex-col gap-1.5 px-2 py-1.5">
           <span className="text-small text-foreground">Theme</span>
-          <ThemeToggle size="sm" />
+          <ThemeToggle size="sm" className="w-full" />
         </div>
 
         <DropdownMenuSeparator />
